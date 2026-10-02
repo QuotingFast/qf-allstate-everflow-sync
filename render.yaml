@@ -1,26 +1,32 @@
+# Candidate only. Applying a blueprint does not authorize resuming this job.
 services:
   - type: cron
     name: qf-allstate-everflow-sync
     runtime: python
-    schedule: "*/15 * * * *"   # every 15 minutes
+    schedule: "*/15 * * * *"
+    autoDeploy: false
     buildCommand: pip install -r requirements.txt
-    startCommand: python sync.py
+    startCommand: python sync.py preview
     envVars:
-      - key: CF_ACCOUNT_ID
-        value: 2b2eaa033a7e1c8fbaf7a1ff1c2c07f8
-      - key: CF_D1_DATABASE_ID
-        value: e5d9ea77-41c7-4f43-80ed-e133d6307fae
-      - key: CF_D1_API_TOKEN
-        sync: false   # set in Render dashboard: <redacted-set-in-render-dashboard>
-      - key: EF_API_KEY
-        sync: false   # set in Render dashboard: <redacted-set-in-render-dashboard>
+      - key: EF_PUBLISH
+        value: "0"
+      - key: EF_REPORTING_PURPOSE
+        value: allocated_click_spend
       - key: EF_OFFER_ID
         value: "4"
-      - key: EF_AFFILIATE_ID
-        value: "1"
-      - key: EF_TIMEZONE_ID
-        value: "80"
-      - key: RATE_LIMIT
-        value: "5"
-      - key: PRICING_CSV_PATH
-        value: allstate_click_pricing_guide.csv
+      - key: EF_EVENT_ID
+        value: "0"
+      - key: EF_REPORTING_AFFILIATE_ID
+        sync: false
+      - key: EF_API_KEY
+        sync: false
+      - key: MIRROR_DATABASE_URL
+        sync: false
+      - key: MIRROR_NOT_BEFORE
+        sync: false
+      - key: REPORTING_ORIGIN
+        value: https://lead-sms-api.onrender.com
+      - key: REPORTING_USER
+        sync: false
+      - key: REPORTING_PASSWORD
+        sync: false
