@@ -1,1 +1,1 @@
-# No external dependencies — uses stdlib only
+psycopg[binary]==3.3.6
