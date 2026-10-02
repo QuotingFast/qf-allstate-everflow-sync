@@ -1,0 +1,31 @@
+name: Mirror regression checks
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Offline contract and delivery tests
+        run: python -m unittest -v test_sync
+      - name: Synthetic PostgreSQL durability and concurrency tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          pg_bin="$(pg_config --bindir)"
+          cluster="$(mktemp -d /tmp/allstate-ef-ci.XXXXXX)"
+          mkdir "$cluster/socket"
+          "$pg_bin/initdb" -D "$cluster/data" -A trust --no-locale -E UTF8
+          "$pg_bin/pg_ctl" -D "$cluster/data" -l "$cluster/server.log" -o "-c listen_addresses= -k $cluster/socket -p 55467" start
+          trap '"$pg_bin/pg_ctl" -D "$cluster/data" stop -m fast' EXIT
+          export TEST_POSTGRES_DSN="host=$cluster/socket port=55467 dbname=postgres user=$USER"
+          python -m unittest -v test_postgres

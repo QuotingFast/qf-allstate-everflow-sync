@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.request
@@ -252,11 +253,14 @@ def database_options(dsn):
     from psycopg.conninfo import conninfo_to_dict
     options=conninfo_to_dict(dsn)
     host=options.get("host","")
-    if host.startswith("/private/tmp/") or host=="/private/tmp":
+    if host in {"/tmp","/private/tmp"} or host.startswith(("/tmp/","/private/tmp/")):
         return {"autocommit":True}  # Synthetic local integration cluster only.
     if not host or host.startswith("/") or "," in host:
         raise RuntimeError("explicit_verified_database_host_required")
-    return {"autocommit":True,"sslmode":"verify-full","sslrootcert":"system","connect_timeout":10}
+    # Binary libpq can search a different CA directory than the host Python.
+    # Use the host's trusted CA bundle when available; never disable validation.
+    ca_file=ssl.get_default_verify_paths().cafile or "system"
+    return {"autocommit":True,"sslmode":"verify-full","sslrootcert":ca_file,"connect_timeout":10}
 
 
 def main(argv=None):

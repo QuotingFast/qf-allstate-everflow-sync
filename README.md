@@ -101,7 +101,9 @@ before activation; do not create a new account or send welcome email.
 The original cron was in Oregon and the main database in Virginia. Use the
 database's authenticated **external hostname**, not a cross-region private DNS
 assumption. The connector forces `sslmode=verify-full` with system CAs and a
-connection timeout. It does not disable certificate verification. Only local
+connection timeout. The actual system CA bundle path is used when available,
+avoiding different CA-directory defaults in bundled libpq. It does not disable
+certificate verification. Only local
 temporary Unix sockets are allowed without TLS for synthetic tests.
 
 ## Release procedure
@@ -168,6 +170,10 @@ synthetic `ef_test_*` schema, which it drops afterward. It tests actual concurre
 claims and source ingestion, cursor/row rollback, and reconnect recovery. Offline
 tests prohibit network access. No production conversion, postback, lead, traffic
 link, or customer-detail URL is used by tests.
+
+The same offline and PostgreSQL suites run in GitHub Actions on pull requests and
+main/codex branch pushes. CI creates an isolated local Unix-socket database and
+stops it afterward; it uses no production credentials or external click endpoints.
 
 The legacy `allstate_click_pricing_guide.csv` is retained as an unused historical
 repository artifact. It cannot influence this service's event prices.

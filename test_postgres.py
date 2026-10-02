@@ -3,6 +3,7 @@
 Creates/drops only a unique ef_test_* schema, never accesses production data.
 """
 import os
+import ssl
 import threading
 import unittest
 import uuid
@@ -23,7 +24,7 @@ class PostgreSQLTests(unittest.TestCase):
         import psycopg
         from psycopg.conninfo import conninfo_to_dict
         host=conninfo_to_dict(DSN).get("host","")
-        if not (host=="/private/tmp" or host.startswith("/private/tmp/")):
+        if not (host in {"/tmp","/private/tmp"} or host.startswith(("/tmp/","/private/tmp/"))):
             raise RuntimeError("test_database_must_use_temporary_local_socket")
         self.psycopg=psycopg
         self.schema="ef_test_"+uuid.uuid4().hex
@@ -96,7 +97,7 @@ class PostgreSQLTests(unittest.TestCase):
     def test_production_connection_forces_verified_tls(self):
         opts=sync.database_options("postgresql://example:example@db.example.test/test?sslmode=disable")
         self.assertEqual(opts["sslmode"],"verify-full")
-        self.assertEqual(opts["sslrootcert"],"system")
+        self.assertEqual(opts["sslrootcert"],ssl.get_default_verify_paths().cafile or "system")
         with self.assertRaises(RuntimeError):sync.database_options("dbname=postgres")
 
     def test_explicit_preparation_is_atomic_and_never_resets_cursor(self):
