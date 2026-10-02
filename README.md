@@ -26,6 +26,8 @@ boolean `has_more`. Source records must have:
 - original `event_id`, `billing_id`, `buyer_id`, `internal_id`, `reporting_ref`;
 - positive frozen `cost` as decimal text, at most four decimal places;
 - valid `state`, boolean `homeowner`, and timezone-qualified `created_at`.
+- `product: auto`, `destination_kind: buyer`, and no disagreement between a
+  supplied `event_state` and the immutable billing `state`.
 
 The mirror holds legacy rows, prepared offers, accepted leads, unknown prices,
 missing identifiers/states, and records before the explicit activation time.

@@ -82,12 +82,16 @@ def normalize(row, cfg, now=None):
     bid = billing_id(row.get("billing_id"))
     if row.get("record_kind") != KIND or row.get("reporting_purpose") != PURPOSE:
         raise Held("not_an_authorized_outbound_spend_record")
+    if row.get("product") != "auto" or row.get("destination_kind") != "buyer":
+        raise Held("not_an_auto_buyer_destination")
     event = identifier(row.get("event_id"), "event_id")
     buyer = identifier(row.get("buyer_id"), "buyer_id")
     internal = identifier(row.get("internal_id"), "internal_id")
     ref = identifier(row.get("reporting_ref"), "reporting_ref")
     if row.get("state") not in STATES:
         raise Held("missing_or_invalid_state")
+    if row.get("event_state") is not None and row["event_state"] != row["state"]:
+        raise Held("event_state_conflict")
     if type(row.get("homeowner")) is not bool:
         raise Held("missing_or_invalid_homeowner")
     try:

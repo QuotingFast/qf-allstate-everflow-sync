@@ -24,6 +24,7 @@ CFG=sync.Config(4,3,0,"2026-10-01T00:00:00Z")
 def row(bid=101,**kw):
     return {"billing_id":str(bid),"event_id":f"synthetic-event-{bid}",
       "record_kind":sync.KIND,"reporting_purpose":sync.PURPOSE,
+      "product":"auto","destination_kind":"buyer",
       "buyer_id":f"synthetic-buyer-{bid}","internal_id":f"synthetic-internal-{bid}",
       "reporting_ref":f"synthetic-report-{bid}","cost":"8.3250","state":"FL",
       "homeowner":False,"created_at":"2026-10-01T05:06:07.123Z",**kw}
@@ -110,6 +111,12 @@ class Tests(unittest.TestCase):
         for kind in [None,"allstate_redirect","shopnbuy","accepted_lead","offer_render"]:
             with self.subTest(kind=kind),self.assertRaises(sync.Held):
                 sync.normalize(row(record_kind=kind),CFG,NOW)
+
+    def test_only_auto_buyer_events_with_consistent_state_are_eligible(self):
+        for kw in [{"product":"home"},{"product":None},{"destination_kind":"fallback"},
+                   {"destination_kind":None},{"event_state":"TX"},{"event_state":""}]:
+            with self.subTest(kw=kw),self.assertRaises(sync.Held):sync.normalize(row(**kw),CFG,NOW)
+        self.assertEqual(sync.normalize(row(event_state="FL"),CFG,NOW)["state"],"FL")
 
     def test_missing_fields_are_not_invented(self):
         for kw in [{"state":""},{"cost":None},{"cost":8.0},{"cost":"NaN"},{"cost":"0"},{"cost":"-2"},{"cost":"1e309"},{"cost":"99999999999999999999999999999999999.9999"},{"homeowner":None},{"homeowner":"false"},{"buyer_id":""},{"event_id":""},{"created_at":"2026-10-01"},{"reporting_purpose":"buyer_paid"}]:
