@@ -64,9 +64,16 @@ Before creating anything, the service reads the provider's complete paginated
 report for that event time and order ID. An exact existing row is not recreated.
 After creation, an HTTP acknowledgment alone is insufficient: the service checks
 the returned report's ID, offer, house affiliate, buyer ID, state, ownership,
-original timestamp, currency, price, zero payout, and base-event status. Missing
+original timestamp in `adv4`, currency, price, zero payout, and base-event status. Missing
 readback remains unverified; conflicting or duplicate records are held. Even a
 `confirmed` state means only this report match, never buyer acceptance.
+
+The manual-reporting endpoint can truncate order IDs to 50 characters and
+normalize its conversion timestamp to midnight UTC. Readback searches the full
+source UTC day and accepts that exact projection only with all the immutable
+fields above still matching. Other timestamps and duplicate candidates fail
+closed. The original occurrence time remains in `adv4` and the source ledger;
+provider daily totals viewed in another timezone can fall on a different date.
 
 Failures before a write can be retried normally. Once an attempt has been
 committed, only read-only reconciliation runs automatically. If absence persists,
