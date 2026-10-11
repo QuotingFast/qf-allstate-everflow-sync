@@ -81,6 +81,12 @@ def receipt(body,**kw):
        "relationship":{"offer":{"network_offer_id":4},"affiliate":{"network_affiliate_id":3}},**kw}
 
 
+def normalized_receipt(body,**kw):
+    stamp=sync.instant(body["date"].replace(" ","T")+"Z").replace(hour=0,minute=0,second=0,microsecond=0)
+    return receipt(body,**{"order_id":body["order_id"][:50],
+                          "conversion_unix_timestamp":int(stamp.timestamp()),**kw})
+
+
 class Tests(unittest.TestCase):
     def setUp(self):
         self.net=patch("urllib.request.OpenerDirector.open",side_effect=AssertionError("network forbidden in tests"));self.net.start()
@@ -333,6 +339,51 @@ class Tests(unittest.TestCase):
             ef=sync.Everflow("synthetic-key")
             with self.subTest(last=last),patch.object(ef,"request",side_effect=[first,last]),self.assertRaises(RuntimeError):
                 ef.lookup(self.body())
+
+    def test_normalized_provider_receipt_reconciles_without_create(self):
+        self.ingest();body=self.body();ef=sync.Everflow("synthetic-key")
+        data={"conversions":[normalized_receipt(body)],"paging":{"page":1,"page_size":1,"total_count":1}}
+        with patch.object(ef,"request",return_value=data) as request,patch.object(ef,"create") as create:
+            self.assertEqual(sync.reconcile_one(self.store,ef,101,body),"confirmed")
+            create.assert_not_called()
+        self.assertEqual(self.store.summary(),{"confirmed":1})
+        query=request.call_args.args[1]
+        self.assertEqual(query["from"],"2026-10-01 00:00:00")
+        self.assertEqual(query["to"],"2026-10-01 23:59:59")
+        self.assertEqual(query["timezone_id"],67)
+
+    def test_canonical_order_is_exactly_full_or_fifty_characters(self):
+        body=self.body();canonical=body["order_id"][:50]
+        for order in [canonical[:-1],body["order_id"][:51],body["order_id"][-50:],"wrong"+canonical[5:]]:
+            with self.subTest(order=order):
+                self.assertFalse(sync.provider_order_matches(body,normalized_receipt(body,order_id=order)))
+                self.assertIsNone(sync.confirmed_match(body,[normalized_receipt(body,order_id=order)]))
+
+    def test_normalized_receipt_mismatches_remain_conflicts(self):
+        self.ingest();body=self.body();good=normalized_receipt(body)
+        cases=[{key:"wrong"} for key in ["adv1","adv2","adv3","adv4","adv5"]]
+        cases += [{"conversion_unix_timestamp":good["conversion_unix_timestamp"]+86400},
+                  {"conversion_unix_timestamp":good["conversion_unix_timestamp"]+3600},
+                  {"revenue":9},{"payout":1},{"currency_id":"CAD"},{"status":"pending"},{"is_event":True},
+                  {"relationship":{"offer":{"network_offer_id":5},"affiliate":{"network_affiliate_id":3}}},
+                  {"relationship":{"offer":{"network_offer_id":4},"affiliate":{"network_affiliate_id":4}}}]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                self.assertIsNone(sync.confirmed_match(body,[normalized_receipt(body,**changes)]))
+        ef=sync.Everflow("synthetic-key")
+        data={"conversions":[normalized_receipt(body,adv4="2026-10-01T05:06:08.123Z")],
+              "paging":{"page":1,"page_size":1,"total_count":1}}
+        with patch.object(ef,"request",return_value=data),patch.object(ef,"create") as create:
+            sync.publish_ready(self.store,ef);create.assert_not_called()
+        self.assertEqual(self.store.summary(),{"conflict":1})
+
+    def test_duplicate_canonical_provider_receipts_never_repost(self):
+        self.ingest();body=self.body();ef=sync.Everflow("synthetic-key")
+        data={"conversions":[receipt(body),normalized_receipt(body)],
+              "paging":{"page":1,"page_size":2,"total_count":2}}
+        with patch.object(ef,"request",return_value=data),patch.object(ef,"create") as create:
+            sync.publish_ready(self.store,ef);create.assert_not_called()
+        self.assertEqual(self.store.summary(),{"conflict":1})
 
 
 if __name__=="__main__":

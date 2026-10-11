@@ -180,8 +180,11 @@ class Everflow:
     def lookup(self, body):
         # No assumption about undocumented order-id filtering or idempotency.
         dt = datetime.strptime(body["date"],"%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-        query = {"from":(dt-timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
-                 "to":(dt+timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
+        day = dt.replace(hour=0,minute=0,second=0,microsecond=0)
+        # Manual reporting can normalize the provider timestamp to midnight.
+        # The immutable original time is still required in adv4 on readback.
+        query = {"from":day.strftime("%Y-%m-%d %H:%M:%S"),
+                 "to":(day+timedelta(days=1)-timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
                  "timezone_id":UTC_TIMEZONE_ID,"currency_id":"USD",
                  "show_conversions":True,"show_events":True,
                  "query":{"filters":[{"resource_type":"offer","filter_id_value":str(body["offer_id"])}]}}
@@ -201,17 +204,24 @@ class Everflow:
             if any(not isinstance(r,dict) for r in rows):
                 raise RuntimeError("incomplete_provider_readback")
             if page==1 and count<=100 and len(rows)==count and max(1,count)<=size<=100:
-                return [r for r in rows if r.get("order_id")==body["order_id"]]
+                return [r for r in rows if provider_order_matches(body,r)]
             if size!=100 or (total is not None and count!=total):
                 raise RuntimeError("invalid_provider_pagination")
             total=count
             expected=min(100,max(0,total-(page-1)*100))
             if len(rows)!=expected or not rows:
                 raise RuntimeError("truncated_provider_readback")
-            matches.extend(r for r in rows if r.get("order_id")==body["order_id"])
+            matches.extend(r for r in rows if provider_order_matches(body,r))
             if page*100>=total:
                 return matches
         raise RuntimeError("provider_readback_limit")
+
+
+def provider_order_matches(body, row):
+    # This endpoint retains at most 50 order-id characters. A canonical match
+    # only selects candidates; full immutable identity is checked below.
+    order=body["order_id"]
+    return row.get("order_id") in {order,order[:50]}
 
 
 def confirmed_match(body, matches):
@@ -219,13 +229,17 @@ def confirmed_match(body, matches):
         return None
     row=matches[0];rel=row.get("relationship") or {}
     try:
-        same=all(row.get(k)==body[k] for k in ["order_id","adv1","adv2","adv3","adv4","adv5"])
+        same=provider_order_matches(body,row)
+        same=same and all(row.get(k)==body[k] for k in ["adv1","adv2","adv3","adv4","adv5"])
         same=same and rel.get("offer",{}).get("network_offer_id")==body["offer_id"]
         same=same and rel.get("affiliate",{}).get("network_affiliate_id")==body["affiliate_id"]
         same=same and Decimal(str(row["revenue"]))==Decimal(str(body["revenue_amount"])) and Decimal(str(row["payout"]))==0
         same=same and row.get("currency_id")=="USD" and row.get("status")=="approved"
-        stamp=int(datetime.strptime(body["date"],"%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC).timestamp())
-        same=same and row.get("conversion_unix_timestamp")==stamp
+        dt=datetime.strptime(body["date"],"%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+        stamp=int(dt.timestamp());day_stamp=int(dt.replace(hour=0,minute=0,second=0,microsecond=0).timestamp())
+        # Accept only the exact timestamp or the observed midnight projection,
+        # never an arbitrary time on the same day. adv4 above remains exact.
+        same=same and type(row.get("conversion_unix_timestamp")) is int and row["conversion_unix_timestamp"] in {stamp,day_stamp}
         same=same and body["event_id"]==0 and row.get("is_event") is False
         cv=row.get("conversion_id")
         return cv if same and isinstance(cv,str) and cv else None
