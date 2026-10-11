@@ -185,19 +185,32 @@ class Everflow:
                  "timezone_id":UTC_TIMEZONE_ID,"currency_id":"USD",
                  "show_conversions":True,"show_events":True,
                  "query":{"filters":[{"resource_type":"offer","filter_id_value":str(body["offer_id"])}]}}
-        matches=[]
+        matches=[];total=None
         for page in range(1,11):
             data=self.request(f"/networks/reporting/conversions?page={page}&page_size=100",query)
             rows,paging=data.get("conversions"),data.get("paging")
             if not isinstance(rows,list) or not isinstance(paging,dict):
                 raise RuntimeError("incomplete_provider_readback")
-            if paging.get("page")!=page or paging.get("page_size")!=100 or type(paging.get("total_count")) is not int:
+            count=paging.get("total_count");size=paging.get("page_size")
+            if (type(paging.get("page")) is not int or paging["page"]!=page
+                    or type(size) is not int or type(count) is not int or count<0):
                 raise RuntimeError("invalid_provider_pagination")
-            matches.extend(r for r in rows if r.get("order_id")==body["order_id"])
-            if page*100>=paging["total_count"]:
-                return matches
-            if not rows:
+            # Everflow reports page_size=1 for an empty result even when 100
+            # was requested. A shorter first page is complete only when its
+            # rows account for the entire declared result, including zero.
+            if any(not isinstance(r,dict) for r in rows):
+                raise RuntimeError("incomplete_provider_readback")
+            if page==1 and count<=100 and len(rows)==count and max(1,count)<=size<=100:
+                return [r for r in rows if r.get("order_id")==body["order_id"]]
+            if size!=100 or (total is not None and count!=total):
+                raise RuntimeError("invalid_provider_pagination")
+            total=count
+            expected=min(100,max(0,total-(page-1)*100))
+            if len(rows)!=expected or not rows:
                 raise RuntimeError("truncated_provider_readback")
+            matches.extend(r for r in rows if r.get("order_id")==body["order_id"])
+            if page*100>=total:
+                return matches
         raise RuntimeError("provider_readback_limit")
 
 
