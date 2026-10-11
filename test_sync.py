@@ -270,6 +270,70 @@ class Tests(unittest.TestCase):
         ef=sync.Everflow("synthetic-key")
         with patch.object(sync,"json_request",return_value={"conversions":[]}),self.assertRaises(RuntimeError):ef.lookup(self.body())
 
+    def test_captured_empty_provider_response_is_complete(self):
+        # Sanitized live response, 2026-10-11: page_size=100 was requested.
+        captured={"conversions":[],"paging":{"page":1,"page_size":1,"total_count":0}}
+        for size in [1,100]:
+            data=copy.deepcopy(captured);data["paging"]["page_size"]=size
+            ef=sync.Everflow("synthetic-key")
+            with self.subTest(size=size),patch.object(ef,"request",return_value=data) as request:
+                self.assertEqual(ef.lookup(self.body()),[])
+                request.assert_called_once()
+                self.assertIn("page=1&page_size=100",request.call_args.args[0])
+
+    def test_empty_provider_response_allows_single_claim_and_readback(self):
+        self.ingest();body=self.body();ef=sync.Everflow("synthetic-key")
+        responses=[{"conversions":[],"paging":{"page":1,"page_size":1,"total_count":0}},
+                   {"result":True},
+                   {"conversions":[receipt(body)],"paging":{"page":1,"page_size":1,"total_count":1}}]
+        with patch.object(ef,"request",side_effect=responses) as request:
+            sync.publish_ready(self.store,ef);sync.publish_ready(self.store,ef)
+        self.assertEqual(self.store.summary(),{"confirmed":1})
+        self.assertEqual(sum(c.args[0]=="/networks/conversions/reporting" for c in request.call_args_list),1)
+
+    def test_complete_short_first_page_prevents_duplicate_submission(self):
+        self.ingest();body=self.body();ef=sync.Everflow("synthetic-key")
+        data={"conversions":[receipt(body)],"paging":{"page":1,"page_size":1,"total_count":1}}
+        with patch.object(ef,"request",return_value=data),patch.object(ef,"create") as create:
+            sync.publish_ready(self.store,ef)
+            create.assert_not_called()
+        self.assertEqual(self.store.summary(),{"confirmed":1})
+
+    def test_malformed_provider_empty_or_partial_readback_never_claims(self):
+        self.ingest();body=self.body()
+        cases=[
+            {"conversions":[],"paging":{"page":1,"page_size":1,"total_count":1}},
+            {"conversions":[receipt(body)],"paging":{"page":1,"page_size":1,"total_count":0}},
+            {"conversions":[],"paging":{"page":1,"page_size":0,"total_count":0}},
+            {"conversions":[],"paging":{"page":True,"page_size":1,"total_count":0}},
+            {"conversions":[],"paging":{"page":1,"page_size":True,"total_count":0}},
+            {"conversions":[],"paging":{"page":1,"page_size":1,"total_count":False}},
+            {"conversions":[],"paging":{"page":1,"page_size":100,"total_count":-1}},
+            {"conversions":[],"paging":{"page":2,"page_size":1,"total_count":0}},
+            {"conversions":[],"paging":{"page":1,"page_size":100,"total_count":1}},
+            {"conversions":[receipt(body)],"paging":{"page":1,"page_size":1,"total_count":2}},
+            {"conversions":[receipt(body),receipt(body)],"paging":{"page":1,"page_size":1,"total_count":2}},
+            {"conversions":[receipt(body)],"paging":{"page":1,"page_size":100,"total_count":2}},
+            {"conversions":[None],"paging":{"page":1,"page_size":100,"total_count":1}},
+        ]
+        for data in cases:
+            ef=sync.Everflow("synthetic-key")
+            with self.subTest(data=data),patch.object(ef,"request",return_value=data),patch.object(ef,"create") as create:
+                with self.assertRaises(RuntimeError):sync.publish_ready(self.store,ef)
+                create.assert_not_called()
+                self.assertEqual(self.store.summary(),{"ready":1})
+
+    def test_later_empty_or_changed_total_is_not_complete_readback(self):
+        first={"conversions":[{"order_id":"other"}]*100,"paging":{"page":1,"page_size":100,"total_count":101}}
+        for last in [
+            {"conversions":[],"paging":{"page":2,"page_size":1,"total_count":0}},
+            {"conversions":[receipt(self.body())],"paging":{"page":2,"page_size":100,"total_count":100}},
+            {"conversions":[],"paging":{"page":2,"page_size":100,"total_count":101}},
+        ]:
+            ef=sync.Everflow("synthetic-key")
+            with self.subTest(last=last),patch.object(ef,"request",side_effect=[first,last]),self.assertRaises(RuntimeError):
+                ef.lookup(self.body())
+
 
 if __name__=="__main__":
     unittest.main()
